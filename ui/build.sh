@@ -30,7 +30,11 @@ build_wasm() {
 	goroot=$(go env GOROOT)
 	for f in "$goroot/lib/wasm/wasm_exec.js" "$goroot/misc/wasm/wasm_exec.js"; do
 		if [ -f "$f" ]; then
+			# GOROOT may be read-only (e.g. a toolchain downloaded into the module
+			# cache); replace the file and make the copy writable for later rebuilds.
+			rm -f "$DIST/wasm_exec.js"
 			cp "$f" "$DIST/wasm_exec.js"
+			chmod 0644 "$DIST/wasm_exec.js"
 			return 0
 		fi
 	done
