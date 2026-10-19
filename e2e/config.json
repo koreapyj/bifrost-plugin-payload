@@ -1,0 +1,277 @@
+{
+  "client": {
+    "drop_excess_requests": false,
+    "enable_logging": false,
+    "enforce_auth_on_inference": true
+  },
+  "governance": {
+    "auth_config": {
+      "is_enabled": true,
+      "admin_username": "@ADMIN_USER@",
+      "admin_password": "@ADMIN_PASSWORD@"
+    },
+    "virtual_keys": [
+      {
+        "id": "vk-e2e",
+        "name": "e2e-vk",
+        "value": "sk-bf-e2e-main",
+        "is_active": true,
+        "provider_configs": [
+          { "provider": "openai", "allowed_models": ["*"], "key_ids": ["*"] },
+          { "provider": "anthropic", "allowed_models": ["*"], "key_ids": ["*"] },
+          { "provider": "failprov", "allowed_models": ["*"], "key_ids": ["*"] }
+        ]
+      },
+      {
+        "id": "vk-other",
+        "name": "e2e-vk-other",
+        "value": "sk-bf-e2e-other",
+        "is_active": true,
+        "provider_configs": [
+          { "provider": "openai", "allowed_models": ["*"], "key_ids": ["*"] },
+          { "provider": "anthropic", "allowed_models": ["*"], "key_ids": ["*"] },
+          { "provider": "failprov", "allowed_models": ["*"], "key_ids": ["*"] }
+        ]
+      }
+    ]
+  },
+  "providers": {
+    "openai": {
+      "keys": [{ "name": "openai-key", "value": "sk-openai-mock", "models": ["*"], "weight": 1.0 }],
+      "network_config": { "base_url": "@MOCK_URL@", "max_retries": 0 }
+    },
+    "anthropic": {
+      "keys": [{ "name": "anthropic-key", "value": "sk-ant-mock", "models": ["*"], "weight": 1.0 }],
+      "network_config": { "base_url": "@MOCK_URL@", "max_retries": 0 }
+    },
+    "failprov": {
+      "keys": [{ "name": "failprov-key", "value": "sk-failprov-mock", "models": ["*"], "weight": 1.0 }],
+      "network_config": { "base_url": "@MOCK_URL@/__fail", "max_retries": 0 },
+      "custom_provider_config": { "base_provider_type": "openai" }
+    }
+  },
+  "plugins": [
+    {
+      "enabled": true,
+      "name": "payload",
+      "path": "@PAYLOAD_SO@",
+      "config": {
+        "passthrough_extra_params": true,
+        "ui": {
+          "enabled": true,
+          "path": "/v1/models/_payload/ui",
+          "api_base": "@BIFROST_URL@"
+        },
+        "rules": [
+          {
+            "name": "http-basic",
+            "description": "default/override/filter on the client body",
+            "enabled": true,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 0,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"basic\"",
+            "query": null,
+            "actions": {
+              "default": { "metadata.http_default": "\"d\"", "temperature": 0.9 },
+              "override": { "top_p": 0.25, "metadata.client": "\"overridden\"" },
+              "filter": ["user"]
+            }
+          },
+          {
+            "name": "http-basic-disabled",
+            "description": "disabled rules are never applied",
+            "enabled": false,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 40,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"basic\"",
+            "query": null,
+            "actions": { "override": { "metadata.disabled_rule": "\"1\"" } }
+          },
+          {
+            "name": "prio-second",
+            "description": "listed first but has the larger priority: must lose",
+            "enabled": true,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 2,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"prio\"",
+            "query": null,
+            "actions": { "override": { "metadata.winner": "\"second\"", "metadata.second_applied": "\"1\"" } }
+          },
+          {
+            "name": "prio-first",
+            "description": "smallest priority wins (first match)",
+            "enabled": true,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 1,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"prio\"",
+            "query": null,
+            "actions": { "override": { "metadata.winner": "\"first\"" } }
+          },
+          {
+            "name": "chain-a",
+            "description": "chain_rule re-evaluates the chain with the modified body",
+            "enabled": true,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 10,
+            "chain_rule": true,
+            "cel_expression": "headers[\"x-e2e\"] == \"chain\"",
+            "query": null,
+            "actions": { "override": { "metadata.chain_a": "\"1\"" } }
+          },
+          {
+            "name": "chain-b",
+            "description": "only matches after chain-a modified the body",
+            "enabled": true,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 11,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"chain\" && has(body.metadata.chain_a) && body.metadata.chain_a == \"1\"",
+            "query": null,
+            "actions": { "override": { "metadata.chain_b": "\"1\"" } }
+          },
+          {
+            "name": "hooks-http",
+            "enabled": true,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 20,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"hooks\"",
+            "query": null,
+            "actions": { "override": { "metadata.h_http": "\"1\"" } }
+          },
+          {
+            "name": "raw-http",
+            "description": "http stage on a native integration route",
+            "enabled": true,
+            "stage": "http",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 30,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"raw\" && path.startsWith(\"/anthropic/\")",
+            "query": null,
+            "actions": { "override": { "stop_sequences": ["END"] } }
+          },
+          {
+            "name": "scope-vk",
+            "description": "scoped to virtual key vk-e2e",
+            "enabled": true,
+            "stage": "request",
+            "scope": "virtual_key",
+            "scope_id": "vk-e2e",
+            "priority": 0,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"scope\"",
+            "query": null,
+            "actions": { "override": { "params.metadata.scope": "\"vk\"" } }
+          },
+          {
+            "name": "scope-global",
+            "enabled": true,
+            "stage": "request",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 0,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"scope\"",
+            "query": null,
+            "actions": { "override": { "params.metadata.scope": "\"global\"" } }
+          },
+          {
+            "name": "hooks-request",
+            "enabled": true,
+            "stage": "request",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 1,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"hooks\" && body_format == \"bifrost\"",
+            "query": null,
+            "actions": { "override": { "params.metadata.h_request": "\"1\"" } }
+          },
+          {
+            "name": "hooks-llm",
+            "description": "params.x_llm_extra is not a ChatParameters field: becomes an extra param",
+            "enabled": true,
+            "stage": "llm",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 0,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"hooks\" && body_format == \"bifrost\"",
+            "query": null,
+            "actions": { "override": { "params.metadata.h_llm": "\"1\"", "params.x_llm_extra": "\"1\"" } }
+          },
+          {
+            "name": "provider-openai",
+            "enabled": true,
+            "stage": "llm",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 1,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"provider\" && provider == \"openai\"",
+            "query": null,
+            "actions": { "override": { "params.top_p": 0.321 } }
+          },
+          {
+            "name": "provider-anthropic",
+            "enabled": true,
+            "stage": "llm",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 2,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"provider\" && provider == \"anthropic\"",
+            "query": null,
+            "actions": { "override": { "params.temperature": 0.123 } }
+          },
+          {
+            "name": "fallback-primary-only",
+            "description": "applied to the failing primary attempt only (copy-on-write proof)",
+            "enabled": true,
+            "stage": "llm",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 3,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"fallback\" && provider == \"failprov\"",
+            "query": null,
+            "actions": { "override": { "params.metadata.primary_only": "\"1\"", "params.x_primary_extra": "\"1\"" } }
+          },
+          {
+            "name": "raw-llm",
+            "description": "raw provider body (Claude Code passthrough on /anthropic)",
+            "enabled": true,
+            "stage": "llm",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 4,
+            "chain_rule": false,
+            "cel_expression": "headers[\"x-e2e\"] == \"raw\" && body_format == \"raw\" && provider == \"anthropic\"",
+            "query": null,
+            "actions": { "override": { "x_raw_marker": { "a": [1, 2] }, "metadata.user_id": "\"raw-user\"" } }
+          }
+        ]
+      }
+    }
+  ]
+}

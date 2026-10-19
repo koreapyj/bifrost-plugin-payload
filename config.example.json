@@ -1,0 +1,78 @@
+{
+  "enabled": true,
+  "name": "payload",
+  "path": "/opt/bifrost/plugins/payload.so",
+  "config": {
+    "passthrough_extra_params": true,
+    "ui": {
+      "enabled": true,
+      "path": "/v1/models/_payload/ui",
+      "api_base": "http://127.0.0.1:8080"
+    },
+    "rules": [
+      {
+        "name": "codex-high-effort",
+        "description": "Responses API calls to gpt-5* from pro-tier clients: default reasoning effort, force JSON output, drop debug metadata",
+        "enabled": true,
+        "stage": "llm",
+        "scope": "global",
+        "scope_id": null,
+        "priority": 0,
+        "chain_rule": false,
+        "cel_expression": "provider == \"openai\" && model.startsWith(\"gpt-5\") && request_type in [\"responses\", \"responses_stream\"] && headers[\"x-tier\"] == \"pro\"",
+        "query": null,
+        "actions": {
+          "default": { "params.reasoning.effort": "\"high\"", "params.max_output_tokens": 32768 },
+          "override": { "params.text.format": "{\"type\":\"json_object\"}" },
+          "filter": ["params.metadata.debug"]
+        }
+      },
+      {
+        "name": "claude-code-thinking",
+        "description": "Native Anthropic body (Claude Code passthrough on /anthropic): enable extended thinking when the client did not set it",
+        "enabled": true,
+        "stage": "llm",
+        "scope": "global",
+        "scope_id": null,
+        "priority": 1,
+        "chain_rule": false,
+        "cel_expression": "body_format == \"raw\" && provider == \"anthropic\" && !has(body.thinking)",
+        "query": null,
+        "actions": {
+          "default": { "thinking": { "type": "enabled", "budget_tokens": 4096 } }
+        }
+      },
+      {
+        "name": "strip-client-user",
+        "description": "Client JSON before Bifrost parses it: remove the user field and tag the request",
+        "enabled": true,
+        "stage": "http",
+        "scope": "global",
+        "scope_id": null,
+        "priority": 0,
+        "chain_rule": true,
+        "cel_expression": "path == \"/v1/chat/completions\" && has(body.user)",
+        "query": null,
+        "actions": {
+          "override": { "metadata.gateway": "\"bifrost\"" },
+          "filter": ["user"]
+        }
+      },
+      {
+        "name": "team-a-temperature",
+        "description": "Only for virtual key vk-team-a: cap sampling temperature (Bifrost view, request stage runs once before fallbacks)",
+        "enabled": true,
+        "stage": "request",
+        "scope": "virtual_key",
+        "scope_id": "vk-team-a",
+        "priority": 0,
+        "chain_rule": false,
+        "cel_expression": "request_type in [\"chat_completion\", \"chat_completion_stream\"]",
+        "query": null,
+        "actions": {
+          "override": { "params.temperature": 0.2, "params.max_completion_tokens": 2048 }
+        }
+      }
+    ]
+  }
+}

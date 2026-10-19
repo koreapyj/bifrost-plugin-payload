@@ -1,0 +1,22 @@
+{
+  "name": "bifrost-plugin-payload-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Management UI for the Bifrost payload plugin (bundled into ui/web/dist and embedded by the Go ui package).",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-querybuilder": "8.11.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

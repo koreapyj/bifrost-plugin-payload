@@ -1,0 +1,340 @@
+{
+  "comment": "Shared fixtures: ui/engine_cases_test.go runs them natively, ui/web/test/engine.test.mjs runs them through engine.wasm. Rules that carry a query also check that the UI converter (ui/web/src/cel.ts) produces exactly their cel_expression. Bodies are compared as parsed JSON.",
+  "validate": [
+    {
+      "name": "empty config",
+      "config": {},
+      "ok": true
+    },
+    {
+      "name": "valid example config",
+      "config": {
+        "rules": [
+          {
+            "name": "codex-high-effort",
+            "enabled": true,
+            "stage": "llm",
+            "scope": "global",
+            "scope_id": null,
+            "priority": 0,
+            "chain_rule": false,
+            "cel_expression": "provider == \"openai\" && model.startsWith(\"gpt-5\") && headers[\"x-tier\"] == \"pro\"",
+            "query": null,
+            "actions": {
+              "default": { "reasoning.effort": "\"high\"", "max_output_tokens": 32768 },
+              "override": { "text.format": "{\"type\":\"json_object\"}" },
+              "filter": ["metadata.debug"]
+            }
+          }
+        ],
+        "passthrough_extra_params": true,
+        "ui": { "enabled": true, "path": "/v1/models/_payload/ui", "api_base": "http://127.0.0.1:8080" }
+      },
+      "ok": true
+    },
+    {
+      "name": "cel compile error",
+      "config": { "rules": [{ "name": "a", "stage": "http", "cel_expression": "model ===" }] },
+      "ok": false,
+      "error_paths": ["rules[0].cel_expression"]
+    },
+    {
+      "name": "unknown cel variable",
+      "config": { "rules": [{ "name": "a", "stage": "http", "cel_expression": "tier == \"pro\"" }] },
+      "ok": false,
+      "error_paths": ["rules[0].cel_expression"]
+    },
+    {
+      "name": "invalid raw json value",
+      "config": { "rules": [{ "name": "a", "stage": "http", "actions": { "default": { "a.b": "high" } } }] },
+      "ok": false,
+      "error_paths": ["rules[0].actions.default[\"a.b\"]"]
+    },
+    {
+      "name": "duplicate priority",
+      "config": {
+        "rules": [
+          { "name": "a", "stage": "http", "priority": 3 },
+          { "name": "b", "stage": "http", "priority": 3 }
+        ]
+      },
+      "ok": false,
+      "error_paths": ["rules[1].priority"]
+    },
+    {
+      "name": "unknown field is a parse error",
+      "config": { "rules": [{ "name": "a", "stage": "http", "colour": "red" }] },
+      "ok": false,
+      "error_paths": [""]
+    }
+  ],
+  "apply": [
+    {
+      "name": "default override filter",
+      "config": {
+        "rules": [
+          {
+            "name": "codex-high-effort",
+            "stage": "http",
+            "priority": 0,
+            "cel_expression": "provider == \"openai\" && model.startsWith(\"gpt-5\") && headers[\"x-tier\"] == \"pro\"",
+            "query": {
+              "combinator": "and",
+              "rules": [
+                { "field": "provider", "operator": "=", "value": "openai" },
+                { "field": "model", "operator": "beginsWith", "value": "gpt-5" },
+                { "field": "headers", "operator": "=", "value": "X-Tier:pro" }
+              ]
+            },
+            "actions": {
+              "default": { "reasoning.effort": "\"high\"", "max_output_tokens": 32768 },
+              "override": { "text.format": "{\"type\":\"json_object\"}" },
+              "filter": ["metadata.debug"]
+            }
+          }
+        ]
+      },
+      "doc": { "model": "openai/gpt-5", "reasoning": { "effort": "low" }, "metadata": { "debug": true, "client": "x" } },
+      "ctx": { "stage": "http", "provider": "openai", "model": "gpt-5", "headers": { "X-Tier": "pro" } },
+      "ok": true,
+      "changed": true,
+      "applied": ["codex-high-effort"],
+      "body": {
+        "model": "openai/gpt-5",
+        "reasoning": { "effort": "low" },
+        "metadata": { "client": "x" },
+        "max_output_tokens": 32768,
+        "text": { "format": { "type": "json_object" } }
+      }
+    },
+    {
+      "name": "no match leaves body unchanged",
+      "config": {
+        "rules": [
+          {
+            "name": "pro-only",
+            "stage": "http",
+            "cel_expression": "headers[\"x-tier\"] == \"pro\"",
+            "actions": { "override": { "x": "1" } }
+          }
+        ]
+      },
+      "doc": { "model": "gpt-4o" },
+      "ctx": { "stage": "http", "headers": { "x-tier": "free" } },
+      "ok": true,
+      "changed": false,
+      "applied": [],
+      "body": { "model": "gpt-4o" }
+    },
+    {
+      "name": "missing header key is a non-match",
+      "config": {
+        "rules": [{ "name": "a", "stage": "http", "cel_expression": "headers[\"x-tier\"] == \"pro\"", "actions": { "override": { "x": "1" } } }]
+      },
+      "doc": {},
+      "ctx": { "stage": "http" },
+      "ok": true,
+      "changed": false,
+      "applied": [],
+      "body": {}
+    },
+    {
+      "name": "first match by priority",
+      "config": {
+        "rules": [
+          { "name": "second", "stage": "http", "priority": 1, "actions": { "override": { "who": "\"second\"" } } },
+          { "name": "first", "stage": "http", "priority": 0, "actions": { "override": { "who": "\"first\"" } } }
+        ]
+      },
+      "doc": { "who": "client" },
+      "ctx": { "stage": "http" },
+      "ok": true,
+      "changed": true,
+      "applied": ["first"],
+      "body": { "who": "first" }
+    },
+    {
+      "name": "chain rule re-evaluates on the modified body",
+      "config": {
+        "rules": [
+          { "name": "a", "stage": "http", "priority": 0, "chain_rule": true, "actions": { "override": { "x": 1 } } },
+          {
+            "name": "b",
+            "stage": "http",
+            "priority": 1,
+            "cel_expression": "has(body.x)",
+            "query": { "combinator": "and", "rules": [{ "field": "body", "operator": "notNull", "value": "x" }] },
+            "actions": { "override": { "y": 2 } }
+          }
+        ]
+      },
+      "doc": {},
+      "ctx": { "stage": "http" },
+      "ok": true,
+      "changed": true,
+      "applied": ["a", "b"],
+      "body": { "x": 1, "y": 2 }
+    },
+    {
+      "name": "virtual key scope wins over global",
+      "config": {
+        "rules": [
+          { "name": "global", "stage": "llm", "actions": { "override": { "z": "\"global\"" } } },
+          { "name": "vk", "stage": "llm", "scope": "virtual_key", "scope_id": "vk1", "actions": { "override": { "z": "\"vk\"" } } }
+        ]
+      },
+      "doc": { "z": 0 },
+      "ctx": { "stage": "llm", "body_format": "raw", "virtual_key_id": "vk1" },
+      "ok": true,
+      "changed": true,
+      "applied": ["vk"],
+      "body": { "z": "vk" }
+    },
+    {
+      "name": "scope without id in context is skipped",
+      "config": {
+        "rules": [
+          { "name": "global", "stage": "llm", "actions": { "override": { "z": "\"global\"" } } },
+          { "name": "vk", "stage": "llm", "scope": "virtual_key", "scope_id": "vk1", "actions": { "override": { "z": "\"vk\"" } } }
+        ]
+      },
+      "doc": { "z": 0 },
+      "ctx": { "stage": "llm", "virtual_key_id": "other" },
+      "ok": true,
+      "changed": true,
+      "applied": ["global"],
+      "body": { "z": "global" }
+    },
+    {
+      "name": "builder body conditions",
+      "config": {
+        "rules": [
+          {
+            "name": "codex-client",
+            "stage": "http",
+            "cel_expression": "body.metadata.client == \"codex\" && body.stream == true && body.max_tokens > 100 && (body.tools[0].type == \"web_search\" || !(has(body.user)))",
+            "query": {
+              "combinator": "and",
+              "rules": [
+                { "field": "body", "operator": "=", "value": "metadata.client:codex" },
+                { "field": "body", "operator": "=", "value": "stream:true" },
+                { "field": "body", "operator": ">", "value": "max_tokens:100" },
+                {
+                  "combinator": "or",
+                  "rules": [
+                    { "field": "body", "operator": "=", "value": "tools.0.type:web_search" },
+                    { "field": "body", "operator": "null", "value": "user" }
+                  ]
+                }
+              ]
+            },
+            "actions": { "override": { "max_tokens": 4096 } }
+          }
+        ]
+      },
+      "doc": { "metadata": { "client": "codex" }, "stream": true, "max_tokens": 1000, "tools": [{ "type": "function" }] },
+      "ctx": { "stage": "http" },
+      "ok": true,
+      "changed": true,
+      "applied": ["codex-client"],
+      "body": { "metadata": { "client": "codex" }, "stream": true, "max_tokens": 4096, "tools": [{ "type": "function" }] }
+    },
+    {
+      "name": "builder list, regex and existence operators",
+      "config": {
+        "rules": [
+          {
+            "name": "ops",
+            "stage": "request",
+            "cel_expression": "!(provider in [\"anthropic\", \"gemini\"]) && model.matches(\"^gpt-[45]\") && \"x-debug\" in headers && team_id == \"\" && request_type in [\"chat_completion\", \"responses\"] && !(\"debug\" in params) && path.endsWith(\"/completions\")",
+            "query": {
+              "combinator": "and",
+              "rules": [
+                { "field": "provider", "operator": "notIn", "value": "anthropic, gemini" },
+                { "field": "model", "operator": "matches", "value": "^gpt-[45]" },
+                { "field": "headers", "operator": "notNull", "value": "X-Debug" },
+                { "field": "team_id", "operator": "null", "value": "" },
+                { "field": "request_type", "operator": "in", "value": "chat_completion,responses" },
+                { "field": "params", "operator": "null", "value": "debug" },
+                { "field": "path", "operator": "endsWith", "value": "/completions" }
+              ]
+            },
+            "actions": { "default": { "user": "\"anon\"" } }
+          }
+        ]
+      },
+      "doc": { "model": "gpt-4o" },
+      "ctx": {
+        "stage": "request",
+        "provider": "openai",
+        "model": "gpt-4o",
+        "request_type": "chat_completion",
+        "path": "/v1/chat/completions",
+        "body_format": "bifrost",
+        "headers": { "X-Debug": "1" }
+      },
+      "ok": true,
+      "changed": true,
+      "applied": ["ops"],
+      "body": { "model": "gpt-4o", "user": "anon" }
+    },
+    {
+      "name": "builder not group and escaping",
+      "config": {
+        "rules": [
+          {
+            "name": "not",
+            "stage": "http",
+            "cel_expression": "!(model == \"a\\\"b\" || headers[\"x-q\"].contains(\"\\\\\"))",
+            "query": {
+              "combinator": "and",
+              "rules": [
+                {
+                  "combinator": "or",
+                  "not": true,
+                  "rules": [
+                    { "field": "model", "operator": "=", "value": "a\"b" },
+                    { "field": "headers", "operator": "contains", "value": "x-q:\\" }
+                  ]
+                }
+              ]
+            },
+            "actions": { "filter": ["drop"] }
+          }
+        ]
+      },
+      "doc": { "drop": 1, "keep": 2 },
+      "ctx": { "stage": "http", "model": "gpt", "headers": { "x-q": "plain" } },
+      "ok": true,
+      "changed": true,
+      "applied": ["not"],
+      "body": { "keep": 2 }
+    },
+    {
+      "name": "other stage is a no-op",
+      "config": { "rules": [{ "name": "llm-only", "stage": "llm", "actions": { "override": { "x": "1" } } }] },
+      "doc": { "x": 0 },
+      "ctx": { "stage": "http" },
+      "ok": true,
+      "changed": false,
+      "applied": [],
+      "body": { "x": 0 }
+    },
+    {
+      "name": "invalid config reports errors",
+      "config": { "rules": [{ "name": "bad", "stage": "http", "cel_expression": "((" }] },
+      "doc": {},
+      "ctx": { "stage": "http" },
+      "ok": false,
+      "error_paths": ["rules[0].cel_expression"]
+    },
+    {
+      "name": "invalid sample body",
+      "config": { "rules": [] },
+      "doc_text": "{not json",
+      "ctx": { "stage": "http" },
+      "ok": false,
+      "error_paths": ["body"]
+    }
+  ]
+}

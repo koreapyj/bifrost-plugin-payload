@@ -1,0 +1,10 @@
+/.claude/
+/.ref/
+/.tmp/
+/ui/web/dist/*
+!/ui/web/dist/.keep
+/ui/web/node_modules/
+*.wasm
+*.wasm.gz
+wasm_exec.js
+*.so
