@@ -384,3 +384,16 @@ func TestVirtualKeyScope(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0.22, *out.ChatRequest.Params.Temperature)
 }
+
+func TestAppliedRulesGoToPluginLogs(t *testing.T) {
+	mustInit(t, `{"rules":[{"name":"tune","stage":"llm","actions":{"override":{"params.temperature":0.3}}}]}`)
+	name := pluginName
+	ctx := newCtx().WithPluginScope(&name)
+	_, _, err := PreLLMHook(ctx, chatRequest())
+	require.NoError(t, err)
+	logs := ctx.GetPluginLogs()
+	require.Len(t, logs, 1)
+	assert.Equal(t, pluginName, logs[0].PluginName)
+	assert.Equal(t, schemas.LogLevelInfo, logs[0].Level)
+	assert.Contains(t, logs[0].Message, "llm stage: applied [tune]")
+}

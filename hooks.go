@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -30,6 +31,36 @@ type httpInfo struct {
 	Headers      map[string]string // lower-cased keys
 }
 
+// reqLog writes a request-scoped message to stderr and to the request's plugin
+// logs (ctx.Log), which Bifrost shows under "Plugin Logs" in the LLM log view.
+// ctx.Log is a no-op outside a plugin-scoped context.
+func reqLog(ctx *schemas.BifrostContext, level schemas.LogLevel, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	switch level {
+	case schemas.LogLevelDebug:
+		logx.Debugf("%s", msg)
+	case schemas.LogLevelWarn:
+		logx.Warnf("%s", msg)
+	case schemas.LogLevelError:
+		logx.Errorf("%s", msg)
+	default:
+		logx.Infof("%s", msg)
+	}
+	if ctx != nil {
+		ctx.Log(level, msg)
+	}
+}
+
+// reqApplied records the rules that changed a request: info in the plugin
+// logs, so every edit is visible per request, but only debug on stderr.
+func reqApplied(ctx *schemas.BifrostContext, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	logx.Debugf("%s", msg)
+	if ctx != nil {
+		ctx.Log(schemas.LogLevelInfo, msg)
+	}
+}
+
 // runHTTPStage stashes request metadata for later stages and applies the http
 // stage rules to the JSON body. It modifies req.Body (and Content-Length) in
 // place, which the transport writes back to the request.
@@ -51,13 +82,13 @@ func runHTTPStage(ctx *schemas.BifrostContext, st *state, req *schemas.HTTPReque
 	}
 	if len(req.Body) == 0 {
 		if bodyExpected(info.Headers) {
-			logx.Infof("http stage skipped for %s %s: request body is not in memory (large payload mode)", req.Method, req.Path)
+			reqLog(ctx, schemas.LogLevelInfo, "http stage skipped for %s %s: request body is not in memory (large payload mode)", req.Method, req.Path)
 		}
 		return
 	}
 	trimmed := bytes.TrimSpace(req.Body)
 	if len(trimmed) == 0 || trimmed[0] != '{' || !gjson.ValidBytes(trimmed) {
-		logx.Debugf("http stage skipped for %s %s: body is not a JSON object", req.Method, req.Path)
+		reqLog(ctx, schemas.LogLevelDebug, "http stage skipped for %s %s: body is not a JSON object", req.Method, req.Path)
 		return
 	}
 
@@ -76,7 +107,7 @@ func runHTTPStage(ctx *schemas.BifrostContext, st *state, req *schemas.HTTPReque
 
 	res, err := st.engine.Apply(req.Body, mc)
 	if err != nil {
-		logx.Warnf("http stage for %s: %v", req.Path, err)
+		reqLog(ctx, schemas.LogLevelWarn, "http stage for %s: %v", req.Path, err)
 		return
 	}
 	if !res.Changed {
@@ -90,7 +121,7 @@ func runHTTPStage(ctx *schemas.BifrostContext, st *state, req *schemas.HTTPReque
 			req.Headers[k] = strconv.Itoa(len(res.Body))
 		}
 	}
-	logx.Debugf("http stage for %s: applied %v", req.Path, res.Applied)
+	reqApplied(ctx, "http stage for %s: applied %v", req.Path, res.Applied)
 }
 
 // bodyExpected reports whether the request headers announce a body.
@@ -133,13 +164,13 @@ func runCoreStage(ctx *schemas.BifrostContext, st *state, req *schemas.BifrostRe
 	if useRaw, _ := ctxValue(ctx, schemas.BifrostContextKeyUseRawRequestBody).(bool); useRaw {
 		body := bifrostview.RawBody(req)
 		if len(body) == 0 {
-			logx.Debugf("%s stage skipped: raw request body mode without a raw body", stage)
+			reqLog(ctx, schemas.LogLevelDebug, "%s stage skipped: raw request body mode without a raw body", stage)
 			return req
 		}
 		mc.BodyFormat = payload.BodyFormatRaw
 		res, err := st.engine.Apply(body, mc)
 		if err != nil {
-			logx.Warnf("%s stage (raw): %v", stage, err)
+			reqLog(ctx, schemas.LogLevelWarn, "%s stage (raw): %v", stage, err)
 			return req
 		}
 		if !res.Changed {
@@ -147,22 +178,22 @@ func runCoreStage(ctx *schemas.BifrostContext, st *state, req *schemas.BifrostRe
 		}
 		out := bifrostview.WithRawBody(req, res.Body)
 		if out == nil {
-			logx.Warnf("%s stage (raw): request type %s has no raw body", stage, req.RequestType)
+			reqLog(ctx, schemas.LogLevelWarn, "%s stage (raw): request type %s has no raw body", stage, req.RequestType)
 			return req
 		}
-		logx.Debugf("%s stage (raw): applied %v", stage, res.Applied)
+		reqApplied(ctx, "%s stage (raw): applied %v", stage, res.Applied)
 		return out
 	}
 
 	mc.BodyFormat = payload.BodyFormatBifrost
 	view, err := bifrostview.Encode(req)
 	if err != nil {
-		logx.Debugf("%s stage skipped: %v", stage, err)
+		reqLog(ctx, schemas.LogLevelDebug, "%s stage skipped: %v", stage, err)
 		return req
 	}
 	res, err := st.engine.Apply(view, mc)
 	if err != nil {
-		logx.Warnf("%s stage: %v", stage, err)
+		reqLog(ctx, schemas.LogLevelWarn, "%s stage: %v", stage, err)
 		return req
 	}
 	if !res.Changed {
@@ -170,16 +201,16 @@ func runCoreStage(ctx *schemas.BifrostContext, st *state, req *schemas.BifrostRe
 	}
 	out, extraAdded, warnings, err := bifrostview.Decode(req, view, res.Body, stage)
 	for _, w := range warnings {
-		logx.Warnf("%s stage, rules %v: %s", stage, res.Applied, w)
+		reqLog(ctx, schemas.LogLevelWarn, "%s stage, rules %v: %s", stage, res.Applied, w)
 	}
 	if err != nil {
-		logx.Errorf("%s stage, rules %v: cannot apply edits, request left unchanged: %v", stage, res.Applied, err)
+		reqLog(ctx, schemas.LogLevelError, "%s stage, rules %v: cannot apply edits, request left unchanged: %v", stage, res.Applied, err)
 		return req
 	}
 	if extraAdded && st.cfg.PassthroughExtraParams && ctx != nil {
 		ctx.SetValue(schemas.BifrostContextKeyPassthroughExtraParams, true)
 	}
-	logx.Debugf("%s stage: applied %v", stage, res.Applied)
+	reqApplied(ctx, "%s stage: applied %v", stage, res.Applied)
 	return out
 }
 

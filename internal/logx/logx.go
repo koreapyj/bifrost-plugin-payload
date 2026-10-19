@@ -1,7 +1,8 @@
-// Package logx is a tiny leveled logger used by the plugin. Bifrost does not
-// hand a logger to dynamically loaded plugins, so messages go to stderr with a
-// "[payload]" prefix. The minimum level is read from PAYLOAD_LOG_LEVEL
-// (debug, info, warn, error; default info).
+// Package logx is a tiny leveled logger for messages that have no request
+// context (Init, Cleanup, panics). Request-scoped messages also go to ctx.Log,
+// which Bifrost shows as plugin logs. Output goes to stderr with a "[payload]"
+// prefix; the minimum level is read from PAYLOAD_LOG_LEVEL (debug, info, warn,
+// error; default info).
 package logx
 
 import (

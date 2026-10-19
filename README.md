@@ -115,6 +115,15 @@ Notes:
   requires a restart of `bifrost-http`. Use a local file path for `path`: a
   plugin loaded from a URL cannot be reloaded ("plugin already loaded").
 
+### Logs
+
+Per-request messages (which rules changed a request at which stage, warnings,
+errors) are written with `ctx.Log` and appear under **Plugin Logs** of the
+request in Bifrost's LLM log view. They are also printed to stderr with a
+`[payload]` prefix together with messages that have no request (`Init`,
+reloads); `PAYLOAD_LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default
+`info`) sets the stderr level. The UI gate never logs to the plugin logs.
+
 ### Kubernetes (official Bifrost Helm chart)
 
 CI also publishes a container image to `ghcr.io/koreapyj/bifrost`
