@@ -66,14 +66,14 @@ body is streamed and not available to rewrite.
 Go plugins (`-buildmode=plugin`) can only be loaded by a host binary built from
 the **same source tree, the same dependency versions and the same Go
 toolchain**. Official Bifrost release binaries are statically linked and cannot
-load plugins at all. Each GitHub release of this repository therefore ships a
-pair that must be used together:
+load plugins at all. Each `bifrost-v<bifrost>` release of this repository
+therefore ships a pair that must be used together (same `<commit>`):
 
-- `bifrost-http-v<bifrost>-linux-<arch>`: dynamically linked Bifrost HTTP
-  gateway built from the `transports/v<bifrost>` tag, with the dashboard.
-- `payload-v<plugin>-bifrost-v<bifrost>-linux-<arch>.so`: the plugin, built in
+- `bifrost-http-v<bifrost>-<commit>-linux-<arch>`: dynamically linked Bifrost
+  HTTP gateway built from the `transports/v<bifrost>` tag, with the dashboard.
+- `payload-<commit>-bifrost-v<bifrost>-linux-<arch>.so`: the plugin, built in
   the same Go workspace and toolchain.
-- `SHA256SUMS-linux-<arch>.txt`.
+- `SHA256SUMS-<commit>-linux-<arch>.txt`.
 
 Architectures: `amd64`, `arm64` (glibc, built on Ubuntu 24.04; cgo is required
 by both binaries).
@@ -87,7 +87,7 @@ plugin to `config.json`:
     {
       "enabled": true,
       "name": "payload",
-      "path": "/opt/bifrost/plugins/payload-v0.1.0-bifrost-v2.3.1-linux-amd64.so",
+      "path": "/opt/bifrost/plugins/payload-0cc1a99864ec-bifrost-v2.3.1-linux-amd64.so",
       "config": { "rules": [], "ui": { "enabled": true, "api_base": "http://127.0.0.1:8080" } }
     }
   ]
@@ -383,11 +383,18 @@ stealth responses and hot reload. It needs `BIFROST_HTTP` and `PAYLOAD_SO`
 `.github/workflows/build.yml`:
 
 - push / pull request: UI assets, `go vet`, `go test`, Node engine test.
-- `workflow_dispatch` (input `bifrost_version`, default: latest stable
-  `transports/v*` tag) and tags `v*`: downloads the Bifrost tarball, syncs the
-  core version, builds the dashboard, `bifrost-http` and `payload.so` on
-  `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64), runs the end-to-end
-  test and uploads the binaries. Tag builds attach them to a GitHub release.
+- push to the default branch, daily schedule and `workflow_dispatch` (no
+  inputs), default branch only:
+  selects the latest four stable `transports/v*` tags (`BIFROST_VERSIONS_COUNT`)
+  and, for each version on `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm`
+  (arm64), downloads the Bifrost tarball, syncs the core version, builds the
+  dashboard, `bifrost-http` and `payload.so`, runs the end-to-end test and
+  publishes the binaries to an automatically created release
+  `bifrost-v<version>`. Asset names contain the plugin commit
+  (`payload-<commit>-bifrost-v<version>-linux-<arch>.so`); a combination whose
+  assets already exist is skipped, and a newer commit replaces older assets.
+- Only the latest Bifrost version is required to build; older versions may
+  lack APIs the plugin uses, and their failures do not fail the run.
 
 ## Limitations
 
