@@ -53,19 +53,9 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       has_work: ${{ steps.plan.outputs.has_work }}
       plugin_rev: ${{ steps.plan.outputs.plugin_rev }}
-      image: ${{ steps.plan.outputs.image }}
-      versions: ${{ steps.plan.outputs.versions }}
     permissions:
       contents: read
-      packages: read
     steps:
-      - name: Log in to ghcr.io
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
       - id: plan
         name: Select Bifrost versions and skip combinations already released
         env:
@@ -74,7 +64,6 @@ jobs:
         run: |
           set -euo pipefail
           rev="${GITHUB_SHA:0:12}"
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/bifrost"
           # Latest stable transports/vX.Y.Z tags; pre-releases (-rc, -beta, ...) are excluded.
           mapfile -t versions < <(gh api --paginate repos/maximhq/bifrost/git/matching-refs/tags/transports/v --jq '.[].ref' \
             | sed 's|^refs/tags/transports/v||' \
@@ -91,9 +80,8 @@ jobs:
             for pair in "ubuntu-24.04 amd64" "ubuntu-24.04-arm arm64"; do
               read -r runner arch <<<"$pair"
               so="payload-${rev}-bifrost-v${bv}-linux-${arch}.so"
-              if printf '%s\n' "$assets" | grep -qxF "$so" \
-                && docker manifest inspect "${image}:v${bv}-${rev}-${arch}" >/dev/null 2>&1; then
-                echo "skip: $so and its image are already published"
+              if printf '%s\n' "$assets" | grep -qxF "$so"; then
+                echo "skip: $so is already published"
                 continue
               fi
               latest=false
@@ -105,8 +93,6 @@ jobs:
           echo "matrix: $include"
           {
             echo "matrix={\"include\":${include}}"
-            echo "versions=$(jq -c '[.[] | {bv, latest}] | unique' <<<"$include")"
-            echo "image=${image}"
             if [ "$include" = "[]" ]; then echo "has_work=false"; else echo "has_work=true"; fi
             echo "plugin_rev=${rev}"
           } >>"$GITHUB_OUTPUT"
@@ -124,11 +110,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
-      packages: write
     env:
       BV: ${{ matrix.bv }}
       REV: ${{ needs.resolve.outputs.plugin_rev }}
-      IMAGE: ${{ needs.resolve.outputs.image }}
       ARCH: ${{ matrix.arch }}
       BUILD_DIR: ${{ github.workspace }}/build
       OUT_DIR: ${{ github.workspace }}/build/out
@@ -261,75 +245,3 @@ jobs:
             | { grep -vF -- "$REV" || true; } \
             | while read -r old; do gh release delete-asset "$tag" "$old" --yes; done
 
-      - name: Log in to ghcr.io
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      # Per-architecture image, built natively on this runner; the manifest job
-      # combines the architectures into multi-arch tags.
-      - name: Build and push image ${{ env.IMAGE }}:v${{ env.BV }}-${{ env.REV }}-${{ env.ARCH }}
-        run: |
-          set -euo pipefail
-          ctx="${RUNNER_TEMP}/image"
-          rm -rf "$ctx" && mkdir -p "$ctx"
-          cp "$OUT_DIR/bifrost-http" "$ctx/bifrost-http"
-          cp "$OUT_DIR/payload.so" "$ctx/payload.so"
-          cp bifrost/transports/docker-entrypoint.sh "$ctx/docker-entrypoint.sh"
-          tag="${IMAGE}:v${BV}-${REV}-${ARCH}"
-          docker build -f plugin/docker/Dockerfile \
-            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.version=v${BV}-${REV}" \
-            -t "$tag" "$ctx"
-          docker push "$tag"
-
-  manifest:
-    name: image manifest (bifrost v${{ matrix.bv }})
-    needs: [resolve, build]
-    if: ${{ !cancelled() && needs.resolve.outputs.has_work == 'true' }}
-    continue-on-error: ${{ !matrix.latest }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.resolve.outputs.versions) }}
-    runs-on: ubuntu-24.04
-    permissions:
-      packages: write
-    env:
-      BV: ${{ matrix.bv }}
-      REV: ${{ needs.resolve.outputs.plugin_rev }}
-      IMAGE: ${{ needs.resolve.outputs.image }}
-      LATEST: ${{ matrix.latest }}
-    steps:
-      - name: Log in to ghcr.io
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Create multi-arch tags
-        run: |
-          set -euo pipefail
-          sources=()
-          for arch in amd64 arm64; do
-            src="${IMAGE}:v${BV}-${REV}-${arch}"
-            if docker manifest inspect "$src" >/dev/null 2>&1; then
-              sources+=("$src")
-            else
-              echo "::warning::$src not found; it is left out of the multi-arch tags"
-            fi
-          done
-          if [ "${#sources[@]}" -eq 0 ]; then
-            echo "::error::no image was built for Bifrost v${BV}"
-            exit 1
-          fi
-          tags=(-t "${IMAGE}:v${BV}-${REV}" -t "${IMAGE}:v${BV}")
-          if [ "$LATEST" = "true" ]; then tags+=(-t "${IMAGE}:latest"); fi
-          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
-          docker buildx imagetools inspect "${IMAGE}:v${BV}-${REV}"
