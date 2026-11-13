@@ -56,6 +56,12 @@ func TestCELVariables(t *testing.T) {
 		TeamName:       "team",
 		CustomerID:     "c-1",
 		CustomerName:   "cust",
+
+		RequestedProvider: "openai",
+		RequestedModel:    "gpt-4o-mini-tts",
+		RoutingRuleID:     "rr-1",
+		RoutingRuleName:   "tts-to-qwen",
+		ComplexityTier:    "SIMPLE",
 	}
 	doc := `{"model":"gpt-5-mini","max_tokens":200,"n":1,"temperature":0.5,"stream":true,"metadata":{"client":"codex"},"tools":[{"type":"function"},{"type":"web_search"}]}`
 
@@ -76,6 +82,10 @@ func TestCELVariables(t *testing.T) {
 		{`virtual_key_id == "vk-1" && virtual_key_name == "vk-name"`, true},
 		{`user_id == "u-1" && team_id == "t-1" && team_name == "team"`, true},
 		{`customer_id == "c-1" && customer_name == "cust"`, true},
+		{`requested_model == "gpt-4o-mini-tts" && requested_provider == "openai"`, true},
+		{`routing_rule_name == "tts-to-qwen" && routing_rule_id == "rr-1"`, true},
+		{`complexity_tier == "SIMPLE"`, true},
+		{`routing_rule_name == "other"`, false},
 		{`stage == "http" && path == "/v1/chat/completions"`, true},
 		{`from_protocol == "openai" && body_format == "raw"`, true},
 		{`body.max_tokens > 100`, true},

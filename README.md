@@ -212,6 +212,9 @@ variables as Bifrost Routing Rules plus plugin-specific ones:
 | `user_id` | string | Governance user. |
 | `team_id`, `team_name` | string | Governance team. |
 | `customer_id`, `customer_name` | string | Governance customer. |
+| `complexity_tier` | string | Complexity tier (e.g. `SIMPLE`, `MEDIUM`, `COMPLEX`); set only when a Bifrost routing rule referenced it, empty otherwise. |
+| `requested_model`, `requested_provider` | string | What the client asked for, before routing rules, load balancing or session routing rewrote it. `requested_provider` is empty for a bare model. At the `http` stage they equal `model`/`provider`. |
+| `routing_rule_name`, `routing_rule_id` | string | The Bifrost routing rule that matched (the last one of a `chain_rule` chain); empty at the `http` stage or when none matched. |
 | `stage` | string | `http`, `request` or `llm`. |
 | `path` | string | HTTP request path, e.g. `/v1/chat/completions`. |
 | `from_protocol` | string | API dialect of the route: `openai`, `anthropic`, `genai`, `bedrock` or `cohere`. |
@@ -229,6 +232,24 @@ Governance variables (and therefore the `virtual_key`, `user`, `team` and
 `PreRequestHook`. They are available to `request` and `llm` rules when the
 payload plugin runs after the built-in plugins (the default `post_builtin`
 placement) and are empty at the `http` stage, where only `global` rules match.
+The same holds for the routing outcome (`routing_rule_*`, `complexity_tier`):
+Bifrost's routing plugin is a built-in plugin, so `request` and `llm` rules see
+the routing decision. Routing Rules' usage variables (`budget_used`,
+`tokens_used`, `request`) are not available: Bifrost computes them inside the
+routing plugin and does not expose them to other plugins.
+
+Example: change the voice of speech requests that a routing rule rewrote from
+`gpt-4o-mini-tts` to a local model. In the Bifrost view (`body_format ==
+"bifrost"`) request parameters live under `params`:
+
+```json
+{
+  "name": "tts-voice",
+  "stage": "llm",
+  "cel_expression": "requested_model == \"gpt-4o-mini-tts\" && model == \"qwen3-tts:1.7b\"",
+  "actions": { "override": { "params.voice": "\"ono_anna\"" } }
+}
+```
 
 ### Evaluation: scope chain, priority, first match, chain_rule
 

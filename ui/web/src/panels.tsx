@@ -144,6 +144,11 @@ const CTX_FIELDS: Array<[keyof CtxText, string, string]> = [
   ["team_name", "Team name", ""],
   ["customer_id", "Customer ID", ""],
   ["customer_name", "Customer name", ""],
+  ["requested_provider", "Requested provider", ""],
+  ["requested_model", "Requested model", ""],
+  ["routing_rule_id", "Routing rule ID", ""],
+  ["routing_rule_name", "Routing rule name", ""],
+  ["complexity_tier", "Complexity tier", ""],
 ];
 
 const DRYRUN_KEY = "payload-ui:dryrun";
@@ -166,6 +171,11 @@ function loadDryRun(): { body: string; ctx: CtxText } {
     team_name: "",
     customer_id: "",
     customer_name: "",
+    requested_provider: "",
+    requested_model: "",
+    routing_rule_id: "",
+    routing_rule_name: "",
+    complexity_tier: "",
   };
   try {
     const saved = JSON.parse(localStorage.getItem(DRYRUN_KEY) || "null");

@@ -104,6 +104,9 @@ func runHTTPStage(ctx *schemas.BifrostContext, st *state, req *schemas.HTTPReque
 		Params:       lowerMap(req.Query),
 	}
 	fillGovernance(ctx, &mc)
+	// Routing has not run yet at the http stage: what the client asked for is
+	// the provider/model of the body itself.
+	mc.RequestedProvider, mc.RequestedModel = provider, model
 
 	res, err := st.engine.Apply(req.Body, mc)
 	if err != nil {
@@ -207,8 +210,20 @@ func runCoreStage(ctx *schemas.BifrostContext, st *state, req *schemas.BifrostRe
 		reqLog(ctx, schemas.LogLevelError, "%s stage, rules %v: cannot apply edits, request left unchanged: %v", stage, res.Applied, err)
 		return req
 	}
-	if extraAdded && st.cfg.PassthroughExtraParams && ctx != nil {
-		ctx.SetValue(schemas.BifrostContextKeyPassthroughExtraParams, true)
+	if out == req {
+		// Every edit was dropped (see the warnings above): the rules matched
+		// but changed nothing Bifrost will send.
+		reqLog(ctx, schemas.LogLevelWarn, "%s stage: rules %v matched but none of their edits could be applied", stage, res.Applied)
+		return req
+	}
+	if extraAdded {
+		if st.cfg.PassthroughExtraParams {
+			if ctx != nil {
+				ctx.SetValue(schemas.BifrostContextKeyPassthroughExtraParams, true)
+			}
+		} else if passthrough, _ := ctxValue(ctx, schemas.BifrostContextKeyPassthroughExtraParams).(bool); !passthrough {
+			reqLog(ctx, schemas.LogLevelWarn, "%s stage, rules %v: the edits added params Bifrost does not know (extra params); they are not sent to the provider unless passthrough_extra_params is true", stage, res.Applied)
+		}
 	}
 	reqApplied(ctx, "%s stage: applied %v", stage, res.Applied)
 	return out
@@ -237,6 +252,7 @@ func coreMatchContext(ctx *schemas.BifrostContext, req *schemas.BifrostRequest, 
 		mc.Params = q
 	}
 	fillGovernance(ctx, &mc)
+	fillRouting(ctx, &mc)
 	return mc
 }
 
@@ -249,6 +265,23 @@ func fillGovernance(ctx *schemas.BifrostContext, mc *payload.MatchContext) {
 	mc.TeamName = ctxString(ctx, schemas.BifrostContextKeyGovernanceTeamName)
 	mc.CustomerID = ctxString(ctx, schemas.BifrostContextKeyGovernanceCustomerID)
 	mc.CustomerName = ctxString(ctx, schemas.BifrostContextKeyGovernanceCustomerName)
+}
+
+// fillRouting copies the routing outcome and the client's original
+// provider/model, which Bifrost and its routing plugin keep in the context.
+// They are set before (requested_*) or during (routing rule, complexity tier)
+// the builtin PreRequestHooks, so both the request and llm stages see them.
+func fillRouting(ctx *schemas.BifrostContext, mc *payload.MatchContext) {
+	switch p := ctxValue(ctx, schemas.BifrostContextKeyRequestedProvider).(type) {
+	case schemas.ModelProvider:
+		mc.RequestedProvider = string(p)
+	case string:
+		mc.RequestedProvider = p
+	}
+	mc.RequestedModel = ctxString(ctx, schemas.BifrostContextKeyRequestedModel)
+	mc.RoutingRuleID = ctxString(ctx, schemas.BifrostContextKeyGovernanceRoutingRuleID)
+	mc.RoutingRuleName = ctxString(ctx, schemas.BifrostContextKeyGovernanceRoutingRuleName)
+	mc.ComplexityTier = ctxString(ctx, schemas.BifrostContextKeyGovernanceComplexityTier)
 }
 
 func ctxValue(ctx *schemas.BifrostContext, key any) any {

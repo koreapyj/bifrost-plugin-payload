@@ -3,7 +3,7 @@ import { BODY_FIELD, MAP_FIELDS } from "./cel.ts";
 export interface FieldDef {
   name: string;
   label: string;
-  group: "Routing" | "Payload";
+  group: "Routing" | "Routing outcome" | "Payload";
   placeholder?: string;
   suggestions?: string[];
 }
@@ -14,10 +14,37 @@ const PROVIDERS = [
 ];
 
 /** Condition fields: Bifrost Routing Rules variables plus the plugin's own variables. */
+// Bifrost request types (schemas.RequestType) a payload rule can meaningfully target.
+const REQUEST_TYPES = [
+  "chat_completion",
+  "chat_completion_stream",
+  "text_completion",
+  "text_completion_stream",
+  "responses",
+  "responses_stream",
+  "embedding",
+  "rerank",
+  "speech",
+  "speech_stream",
+  "transcription",
+  "transcription_stream",
+  "image_generation",
+  "image_generation_stream",
+  "image_edit",
+  "image_edit_stream",
+  "image_variation",
+  "video_generation",
+  "video_edit",
+  "video_remix",
+  "ocr",
+  "count_tokens",
+  "compaction",
+];
+
 export const FIELDS: FieldDef[] = [
   { name: "model", label: "Model", group: "Routing", placeholder: "gpt-4o" },
   { name: "provider", label: "Provider", group: "Routing", suggestions: PROVIDERS },
-  { name: "request_type", label: "Request type", group: "Routing", suggestions: ["chat_completion", "text_completion", "responses", "embedding"] },
+  { name: "request_type", label: "Request type", group: "Routing", suggestions: REQUEST_TYPES },
   { name: "headers", label: "Header", group: "Routing", placeholder: "x-tier" },
   { name: "params", label: "Query param", group: "Routing", placeholder: "api-version" },
   { name: "virtual_key_id", label: "Virtual key ID", group: "Routing" },
@@ -27,6 +54,11 @@ export const FIELDS: FieldDef[] = [
   { name: "team_name", label: "Team name", group: "Routing" },
   { name: "customer_id", label: "Customer ID", group: "Routing" },
   { name: "customer_name", label: "Customer name", group: "Routing" },
+  { name: "complexity_tier", label: "Complexity tier", group: "Routing", suggestions: ["SIMPLE", "MEDIUM", "COMPLEX"] },
+  { name: "routing_rule_name", label: "Matched routing rule name", group: "Routing outcome" },
+  { name: "routing_rule_id", label: "Matched routing rule ID", group: "Routing outcome" },
+  { name: "requested_model", label: "Requested model (before routing)", group: "Routing outcome", placeholder: "gpt-4o-mini-tts" },
+  { name: "requested_provider", label: "Requested provider (before routing)", group: "Routing outcome", suggestions: PROVIDERS },
   { name: "stage", label: "Stage", group: "Payload", suggestions: ["http", "request", "llm"] },
   { name: "path", label: "HTTP path", group: "Payload", placeholder: "/v1/chat/completions" },
   { name: "from_protocol", label: "From protocol", group: "Payload", suggestions: ["openai", "anthropic", "genai", "bedrock", "cohere"] },

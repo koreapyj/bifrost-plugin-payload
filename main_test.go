@@ -359,6 +359,11 @@ func TestGovernanceAndQueryInMatchContext(t *testing.T) {
 	ctx.SetValue(schemas.BifrostContextKeyGovernanceCustomerID, "c1")
 	ctx.SetValue(schemas.BifrostContextKeyGovernanceCustomerName, "cust")
 	ctx.SetValue(schemas.BifrostContextKeyRequestQuery, map[string]string{"q": "1"})
+	ctx.SetValue(schemas.BifrostContextKeyRequestedProvider, schemas.ModelProvider("openai"))
+	ctx.SetValue(schemas.BifrostContextKeyRequestedModel, "gpt-4o-mini-tts")
+	ctx.SetValue(schemas.BifrostContextKeyGovernanceRoutingRuleID, "rr-1")
+	ctx.SetValue(schemas.BifrostContextKeyGovernanceRoutingRuleName, "tts-to-qwen")
+	ctx.SetValue(schemas.BifrostContextKeyGovernanceComplexityTier, "SIMPLE")
 	ctx.SetValue(httpInfoKey, &httpInfo{Path: "/anthropic/v1/messages", FromProtocol: "anthropic", Headers: map[string]string{"x-a": "b"}})
 	mc := coreMatchContext(ctx, chatRequest(), payload.StageLLM)
 	assert.Equal(t, payload.MatchContext{
@@ -367,6 +372,8 @@ func TestGovernanceAndQueryInMatchContext(t *testing.T) {
 		Headers: map[string]string{"x-a": "b"}, Params: map[string]string{"q": "1"},
 		VirtualKeyID: "vk1", VirtualKeyName: "vk-name", UserID: "u1",
 		TeamID: "t1", TeamName: "team", CustomerID: "c1", CustomerName: "cust",
+		RequestedProvider: "openai", RequestedModel: "gpt-4o-mini-tts",
+		RoutingRuleID: "rr-1", RoutingRuleName: "tts-to-qwen", ComplexityTier: "SIMPLE",
 	}, mc)
 }
 
@@ -396,4 +403,49 @@ func TestAppliedRulesGoToPluginLogs(t *testing.T) {
 	assert.Equal(t, pluginName, logs[0].PluginName)
 	assert.Equal(t, schemas.LogLevelInfo, logs[0].Level)
 	assert.Contains(t, logs[0].Message, "llm stage: applied [tune]")
+}
+
+func speechRequest() *schemas.BifrostRequest {
+	voice := "marin"
+	return &schemas.BifrostRequest{RequestType: schemas.SpeechRequest, SpeechRequest: &schemas.BifrostSpeechRequest{
+		Provider: "ollama",
+		Model:    "qwen3-tts:1.7b",
+		Input:    &schemas.SpeechInput{Input: "hi"},
+		Params:   &schemas.SpeechParameters{VoiceConfig: &schemas.SpeechVoiceInput{Voice: &voice}, ResponseFormat: "mp3"},
+	}}
+}
+
+func TestSpeechVoiceOverrideInBifrostView(t *testing.T) {
+	name := pluginName
+	for _, tc := range []struct {
+		path, voice, logLevel, logText string
+	}{
+		{"params.voice", "ono_anna", "info", "llm stage: applied [tts]"},
+		{"voice", "marin", "warn", "matched but none of their edits could be applied"},
+	} {
+		mustInit(t, `{"rules":[{"name":"tts","stage":"llm","cel_expression":"model == \"qwen3-tts:1.7b\"","actions":{"override":{"`+tc.path+`":"\"ono_anna\""}}}]}`)
+		ctx := newCtx().WithPluginScope(&name)
+		out, _, err := PreLLMHook(ctx, speechRequest())
+		require.NoError(t, err)
+		assert.Equal(t, tc.voice, *out.SpeechRequest.Params.VoiceConfig.Voice, tc.path)
+		logs := ctx.GetPluginLogs()
+		require.NotEmpty(t, logs, tc.path)
+		last := logs[len(logs)-1]
+		assert.Equal(t, schemas.LogLevel(tc.logLevel), last.Level, tc.path)
+		assert.Contains(t, last.Message, tc.logText, tc.path)
+	}
+}
+
+func TestExtraParamsWithoutPassthroughWarns(t *testing.T) {
+	mustInit(t, `{"rules":[{"name":"g","stage":"llm","actions":{"override":{"params.chat_template_kwargs.enable_thinking":"false"}}}]}`)
+	name := pluginName
+	ctx := newCtx().WithPluginScope(&name)
+	out, _, err := PreLLMHook(ctx, chatRequest())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"enable_thinking": false}, out.ChatRequest.Params.ExtraParams["chat_template_kwargs"])
+	assert.Nil(t, ctx.Value(schemas.BifrostContextKeyPassthroughExtraParams))
+	logs := ctx.GetPluginLogs()
+	require.Len(t, logs, 2)
+	assert.Equal(t, schemas.LogLevelWarn, logs[0].Level)
+	assert.Contains(t, logs[0].Message, "passthrough_extra_params")
 }

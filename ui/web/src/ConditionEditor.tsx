@@ -141,7 +141,8 @@ export function ConditionEditor(props: {
           />
           <p className="muted small">
             Variables: model, provider, request_type, headers, params, virtual_key_id, virtual_key_name, user_id, team_id,
-            team_name, customer_id, customer_name, stage, path, from_protocol, body_format, body. An empty expression always matches.
+            team_name, customer_id, customer_name, complexity_tier, requested_model, requested_provider, routing_rule_id,
+            routing_rule_name, stage, path, from_protocol, body_format, body. An empty expression always matches.
           </p>
         </>
       )}

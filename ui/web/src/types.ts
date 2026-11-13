@@ -61,6 +61,11 @@ export interface MatchContext {
   team_name: string;
   customer_id: string;
   customer_name: string;
+  requested_provider: string;
+  requested_model: string;
+  routing_rule_id: string;
+  routing_rule_name: string;
+  complexity_tier: string;
 }
 
 /** A rule plus a client-only key used for React identity; the key is never serialized. */

@@ -95,6 +95,17 @@ type MatchContext struct {
 	TeamName       string `json:"team_name"`
 	CustomerID     string `json:"customer_id"`
 	CustomerName   string `json:"customer_name"`
+
+	// What the client asked for, before routing rules, load balancing or
+	// session routing rewrote provider/model. RequestedProvider is empty when
+	// the client sent a bare model.
+	RequestedProvider string `json:"requested_provider"`
+	RequestedModel    string `json:"requested_model"`
+	// The Bifrost routing rule that matched (the last one of a chain), and the
+	// complexity tier when a routing rule computed one. Empty otherwise.
+	RoutingRuleID   string `json:"routing_rule_id"`
+	RoutingRuleName string `json:"routing_rule_name"`
+	ComplexityTier  string `json:"complexity_tier"`
 }
 
 // FieldError is a validation error located at a JSON path inside the config,
